@@ -186,8 +186,9 @@ class AMF0:
 	def parse(data):
 		f = io.BytesIO(data)
 		decoded = []
+		objects = []
 		try:
-			while f.tell() < len(data): decoded.append(AMF0.read(f))
+			while f.tell() < len(data): decoded.append(AMF0.read(f, objects))
 		except Exception:
 			log.exception('Error decoding AMF0 data')
 		return decoded
@@ -195,27 +196,34 @@ class AMF0:
 	def read_str(f, sz):
 		return f.read(*read(f, sz)).decode('utf8', 'replace')
 
-	def read(f):
+	def read(f, objects):
 		t, = f.read(1)
 		if t == 0: return read(f, '>d')[0]
 		if t == 1: return bool(*f.read(1))
 		if t == 2: return AMF0.read_str(f, '>H')
-		if t in (3,8):
+		if t in (3,8,16):
 			if t == 8: f.read(4)
+			if t == 16: cls = AMF0.read_str(f, '>H')
 			obj = {}
 			while True:
 				name = AMF0.read_str(f, '>H')
-				val = AMF0.read(f)
+				val = AMF0.read(f, objects)
 				if val is StopIteration: break
 				obj[name] = val
+			if t == 16: obj = cls, obj
+			objects.append(obj)
 			return obj
 		if t == 4: return 'MovieClip', AMF0.read_str(f, '>H')
 		if t in (5,6): return None
-		if t == 7: return 'Reference', read(f, '>H')[0]
+		if t == 7: return objects[read(f, '>H')[0]]
 		if t == 9: return StopIteration
-		if t == 10: return [AMF0.read(f) for _ in range(*read(f, '>I'))]
+		if t == 10:
+			array = [AMF0.read(f, objects) for _ in range(*read(f, '>I'))]
+			objects.append(array)
+			return array
 		if t == 11: return ('Date',) + read(f, '>dH')
 		if t == 12: return AMF0.read_str(f, '>I')
+		if t == 15: return 'XMLDocument', AMF0.read_str(f, '>I')
 		raise Exception('Unhandled type %i at 0x%x' % (t, f.tell()-1))
 
 if __name__ == '__main__': main(parser.parse_args())
