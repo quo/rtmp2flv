@@ -54,12 +54,16 @@ def convert_file(fn, args):
 
 		flvs = {}
 		prevts = {}
+		tsoffset = {}
 		try:
 			for m in read_rtmp_messages(f, args.chunksize):
 				d = m.timestamp - prevts.get((m.streamid, m.type), 0)
+				offset = tsoffset.get((m.streamid, m.type), 0)
 				if d < 0:
 					log.warn('Timestamp moving backwards! stream=%i, type=%i, d=%i, from %i to %i',
 						m.streamid, m.type, d, m.timestamp-d, m.timestamp)
+					offset -= d
+					tsoffset[m.streamid, m.type] = offset
 				elif d > 2000:
 					log.warn('Timestamp jumping forwards! stream=%i, type=%i, d=%i, from %i to %i',
 						m.streamid, m.type, d, m.timestamp-d, m.timestamp)
@@ -71,16 +75,17 @@ def convert_file(fn, args):
 						else open('%s.%i.flv' % (fn, m.streamid), 'wb'))
 					log.info('Writing to %r', flv.name)
 					flv.write(FLV_HEADER)
-				for buf in get_flv_data(m): flv.write(buf)
+				for buf in get_flv_data(m, offset): flv.write(buf)
 		finally:
 			for flv in flvs.values(): flv.close()
 
 FLV_HEADER = b'FLV\1\5\0\0\0\x09\0\0\0\0'
 
-def get_flv_data(msg):
+def get_flv_data(msg, offset):
+	ts = msg.timestamp + offset
 	yield struct.pack('>BHBHBB', msg.type,
 		len(msg.data) >> 8, len(msg.data) & 0xff,
-		(msg.timestamp >> 8) & 0xffff, msg.timestamp & 0xff, msg.timestamp >> 24)
+		(ts >> 8) & 0xffff, ts & 0xff, ts >> 24)
 	yield b'\0\0\0' # stream id
 	yield msg.data
 	yield struct.pack('>I', len(msg.data)+11)
